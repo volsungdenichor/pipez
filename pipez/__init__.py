@@ -1,3 +1,4 @@
-from pipe.seq import seq
-from pipe.opt import opt
-from pipe.pipe import Pipe
+from pipez.seq import seq
+from pipez.opt import opt
+from pipez.pipe import Pipe
+
