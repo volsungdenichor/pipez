@@ -34,12 +34,6 @@ class Seq:
 
     @staticmethod
     @Pipe
-    def associate(iterable, func):
-        func = to_unary(func)
-        return iterable >> Seq.map(lambda item: (item, func(item)))
-
-    @staticmethod
-    @Pipe
     def replace_if(iterable, pred, new_value):
         pred = to_unary(pred)
         return iterable >> Seq.map(lambda item: new_value if pred(item) else item)
@@ -231,19 +225,19 @@ class Seq:
     @staticmethod
     @Pipe
     def sum(iterable):
-        return sum(iterable)
+        return builtins.sum(iterable)
 
     @staticmethod
     @Pipe
     def min(iterable, key=None):
         key = to_unary(key)
-        return min(iterable, key=key)
+        return builtins.min(iterable, key=key)
 
     @staticmethod
     @Pipe
     def max(iterable, key=None):
         key = to_unary(key)
-        return max(iterable, key=key)
+        return builtins.max(iterable, key=key)
 
     @staticmethod
     @Pipe

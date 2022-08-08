@@ -30,12 +30,21 @@ class Opt:
     def value_or_raise(obj, exception):
         if obj is not None:
             return obj
-        raise exception
+        raise Opt.to_exception(exception)
 
     @staticmethod
     @Pipe
     def value(obj):
         return obj >> Opt.value_or_raise('None value')
+
+    @staticmethod
+    def to_exception(exception):
+        if isinstance(exception, Exception):
+            return exception
+        elif isinstance(exception, str):
+            return RuntimeError(exception)
+        elif callable(exception):
+            return Opt.to_exception(exception())
 
 
 opt = Opt
