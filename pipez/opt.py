@@ -2,7 +2,8 @@ from pipez.functions import to_unary
 from pipez.pipe import Pipe
 
 
-class Opt:
+# noinspection PyPep8Naming
+class opt:
     @staticmethod
     @Pipe
     def map(obj, func):
@@ -30,12 +31,12 @@ class Opt:
     def value_or_raise(obj, exception):
         if obj is not None:
             return obj
-        raise Opt.to_exception(exception)
+        raise opt.to_exception(exception)
 
     @staticmethod
     @Pipe
     def value(obj):
-        return obj >> Opt.value_or_raise('None value')
+        return obj >> opt.value_or_raise('None value')
 
     @staticmethod
     def to_exception(exception):
@@ -44,7 +45,4 @@ class Opt:
         elif isinstance(exception, str):
             return RuntimeError(exception)
         elif callable(exception):
-            return Opt.to_exception(exception())
-
-
-opt = Opt
+            return opt.to_exception(exception())

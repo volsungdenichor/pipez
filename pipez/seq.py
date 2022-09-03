@@ -14,7 +14,8 @@ def _adjust_selectors(key_selector, value_selector):
         return to_unary(key_selector) or identity, to_unary(value_selector) or identity
 
 
-class Seq:
+# noinspection PyPep8Naming
+class seq:
     @staticmethod
     @Pipe
     def len(iterable):
@@ -30,18 +31,18 @@ class Seq:
     @Pipe
     def associate(iterable, func):
         func = to_unary(func)
-        return iterable >> Seq.map(lambda item: (item, func(item)))
+        return iterable >> seq.map(lambda item: (item, func(item)))
 
     @staticmethod
     @Pipe
     def replace_if(iterable, pred, new_value):
         pred = to_unary(pred)
-        return iterable >> Seq.map(lambda item: new_value if pred(item) else item)
+        return iterable >> seq.map(lambda item: new_value if pred(item) else item)
 
     @staticmethod
     @Pipe
     def replace(iterable, old_value, new_value):
-        return iterable >> Seq.map(lambda item: new_value if item == old_value else item)
+        return iterable >> seq.map(lambda item: new_value if item == old_value else item)
 
     @staticmethod
     @Pipe
@@ -53,7 +54,7 @@ class Seq:
     @Pipe
     def drop_if(iterable, pred):
         pred = to_unary(pred)
-        return iterable >> Seq.take_if(negate(pred))
+        return iterable >> seq.take_if(negate(pred))
 
     filter = take_if
 
@@ -61,7 +62,7 @@ class Seq:
     @Pipe
     def exclude(iterable, other_iterable):
         other_iterable = set(other_iterable)
-        return iterable >> Seq.drop_if(lambda x: x in other_iterable)
+        return iterable >> seq.drop_if(lambda x: x in other_iterable)
 
     @staticmethod
     @Pipe
@@ -88,7 +89,7 @@ class Seq:
     @Pipe
     def take_until(iterable, pred):
         pred = negate(to_unary(pred))
-        return iterable >> Seq.take_while(pred)
+        return iterable >> seq.take_while(pred)
 
     @staticmethod
     @Pipe
@@ -100,7 +101,7 @@ class Seq:
     @Pipe
     def drop_until(iterable, pred):
         pred = to_unary(pred)
-        return iterable >> Seq.drop_while(negate(pred))
+        return iterable >> seq.drop_while(negate(pred))
 
     @staticmethod
     @Pipe
@@ -132,15 +133,15 @@ class Seq:
     @Pipe
     def flat_map(iterable, func):
         return iterable \
-               >> Seq.map(func) \
-               >> Seq.flatten()
+               >> seq.map(func) \
+               >> seq.flatten()
 
     @staticmethod
     @Pipe
     def filter_map(iterable, func):
         return iterable \
-               >> Seq.map(func) \
-               >> Seq.filter(lambda item: item is not None)
+               >> seq.map(func) \
+               >> seq.filter(lambda item: item is not None)
 
     @staticmethod
     @Pipe
@@ -150,23 +151,23 @@ class Seq:
     @staticmethod
     @Pipe
     def partition(iterable, pred):
-        s1, s2 = iterable >> Seq.tee(2)
-        return s1 >> Seq.take_if(pred), s2 >> Seq.drop_if(pred)
+        s1, s2 = iterable >> seq.tee(2)
+        return s1 >> seq.take_if(pred), s2 >> seq.drop_if(pred)
 
     @staticmethod
     @Pipe
     def all(iterable, pred=bool):
-        return builtins.all(iterable >> Seq.map(pred))
+        return builtins.all(iterable >> seq.map(pred))
 
     @staticmethod
     @Pipe
     def any(iterable, pred=bool):
-        return builtins.any(iterable >> Seq.map(pred))
+        return builtins.any(iterable >> seq.map(pred))
 
     @staticmethod
     @Pipe
     def none(iterable, pred=bool):
-        return not builtins.any(iterable >> Seq.map(pred))
+        return not builtins.any(iterable >> seq.map(pred))
 
     @staticmethod
     @Pipe
@@ -178,6 +179,7 @@ class Seq:
     @staticmethod
     @Pipe
     def inspect(iterable, func):
+        func = to_unary(func)
         for item in iterable:
             func(item)
             yield item
@@ -185,7 +187,7 @@ class Seq:
     @staticmethod
     @Pipe
     def join(iterable, separator=''):
-        return separator.join(iterable >> Seq.map(str))
+        return separator.join(iterable >> seq.map(str))
 
     @staticmethod
     @Pipe
@@ -247,7 +249,7 @@ class Seq:
     @staticmethod
     @Pipe
     def nth(iterable, n):
-        return iterable >> Seq.drop(n) >> Seq.first()
+        return iterable >> seq.drop(n) >> seq.first()
 
     @staticmethod
     @Pipe
@@ -265,6 +267,3 @@ class Seq:
                 buffer = []
         if buffer:
             yield buffer
-
-
-seq = Seq
