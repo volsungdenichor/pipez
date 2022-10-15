@@ -1,6 +1,3 @@
-import functools
-
-
 def do_nothing(*_, **__):
     pass
 
@@ -14,10 +11,6 @@ def negate(func):
         return not func(*args, **kwargs)
 
     return result
-
-
-def pipe(*functions):
-    return functools.reduce(lambda f, g: lambda x: g(f(x)), functions)
 
 
 # noinspection PyPep8Naming

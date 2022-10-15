@@ -1,33 +1,53 @@
-from functools import update_wrapper
+def fmt(f):
+    if hasattr(f, '__name__'):
+        return f.__name__
+    if hasattr(f, '__qualname__'):
+        return f.__qualname__
+    return str(f)
 
 
-class Pipe:
-    def __init__(self, func, funcs=None):
-        self.func = func
-        self.funcs = funcs if funcs is not None else (func,)
-        update_wrapper(self, func)
-
-    def __call__(self, *args, **kwargs):
-        def call(arg):
-            return self.func(arg, *args, **kwargs)
-
-        call.__name__ = self.func.__qualname__
-
-        return Pipe(call)
+class Pipeable:
+    def __rrshift__(self, item):
+        return self(item)
 
     def __rshift__(self, other):
-        assert isinstance(other, Pipe), 'Pipe expected'
+        return Pipe(self, other)
 
-        def call(arg):
-            return other.func(self.func(arg))
 
-        return Pipe(call, self.funcs + other.funcs)
+class Pipe(Pipeable):
+    def __init__(self, *pipes):
+        self.pipes = pipes
 
-    def __rrshift__(self, other):
-        return self.func(other)
+    def __call__(self, item):
+        for p in self.pipes:
+            item = p(item)
+        return item
+
+    def __rshift__(self, other):
+        if isinstance(other, Pipe):
+            return Pipe(*self.pipes, *other.pipes)
+        else:
+            return Pipe(*self.pipes, other)
 
     def __repr__(self):
-        def format_func(f):
-            return f.__name__
+        return '[' + '; '.join(fmt(p) for p in self.pipes) + ']'
 
-        return f"[{', '.join(map(format_func, self.funcs))}]"
+
+def pipeable(func):
+    class Wrapper(Pipeable):
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+        def __call__(self, arg):
+            return func(arg, *self.args, **self.kwargs)
+
+        def __repr__(self):
+            return fmt(func) + '(' \
+                   + ', '.join(f'{fmt(a)}' for a in self.args) \
+                   + ', '.join(f'{k}={fmt(v)}' for k, v in self.kwargs.items()) + ')'
+
+    return Wrapper
+
+
+fn = Pipe
