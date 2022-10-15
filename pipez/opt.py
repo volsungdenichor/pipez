@@ -36,9 +36,8 @@ class opt:
         raise opt._to_exception(exception)
 
     @staticmethod
-    @pipeable
-    def value(obj):
-        return obj >> opt.value_or_raise('None value')
+    def value():
+        return opt.value_or_raise('None value')
 
     @staticmethod
     def _to_exception(exception):

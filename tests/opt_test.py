@@ -28,3 +28,9 @@ def test_value_or_raise():
     assert 9 >> opt.value_or_raise(RuntimeError()) == 9
     with pytest.raises(RuntimeError):
         None >> opt.value_or_raise(RuntimeError())
+
+
+def test_value():
+    assert 9 >> opt.value() == 9
+    with pytest.raises(RuntimeError):
+        None >> opt.value()
