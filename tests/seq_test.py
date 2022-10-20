@@ -32,6 +32,7 @@ def test_associate():
 
 
 def test_take_if():
+    assert list(range(0, 10) >> seq.filter(is_even)) == [0, 2, 4, 6, 8]
     assert list(range(0, 10) >> seq.take_if(is_even)) == [0, 2, 4, 6, 8]
 
 
