@@ -1,5 +1,3 @@
-from operator import itemgetter
-
 from pipez import seq
 from pipez.pipe import fn
 
@@ -27,10 +25,6 @@ def test_map():
     assert list(range(5) >> seq.map(sqr)) == [0, 1, 4, 9, 16]
 
 
-def test_associate():
-    assert list(range(10, 15) >> seq.associate(sqr)) == [(10, 100), (11, 121), (12, 144), (13, 169), (14, 196)]
-
-
 def test_take_if():
     assert list(range(0, 10) >> seq.filter(is_even)) == [0, 2, 4, 6, 8]
     assert list(range(0, 10) >> seq.take_if(is_even)) == [0, 2, 4, 6, 8]
@@ -38,14 +32,6 @@ def test_take_if():
 
 def test_drop_if():
     assert list(range(0, 10) >> seq.drop_if(is_even)) == [1, 3, 5, 7, 9]
-
-
-def test_replace_if():
-    assert list(range(0, 10) >> seq.replace_if(is_even, -1)) == [-1, 1, -1, 3, -1, 5, -1, 7, -1, 9]
-
-
-def test_replace():
-    assert list(range(0, 5) >> seq.replace(2, -1)) == [0, 1, -1, 3, 4]
 
 
 def test_take():
@@ -58,10 +44,6 @@ def test_drop():
 
 def test_step():
     assert list(range(10) >> seq.step(3)) == [0, 3, 6, 9]
-
-
-def test_exclude():
-    assert list(range(10) >> seq.exclude([1, 3, 5, 7])) == [0, 2, 4, 6, 8, 9]
 
 
 def test_take_while():
@@ -181,21 +163,3 @@ def test_nth():
 
 def test_extend():
     assert list(fibonacci() >> seq.take(5) >> seq.extend(range(100, 103))) == [1, 1, 2, 3, 5, 100, 101, 102]
-
-
-def test_chunk():
-    assert list(fibonacci() >> seq.chunk(5) >> seq.take(3)) == [
-        [1, 1, 2, 3, 5],
-        [8, 13, 21, 34, 55],
-        [89, 144, 233, 377, 610]
-    ]
-
-
-def test_tail():
-    assert list(fibonacci() >> seq.take_while(lambda x: x < 100) >> seq.tail(5)) == [13, 21, 34, 55, 89]
-
-
-def test_slide():
-    assert list(fibonacci() >> seq.slide(3) >> seq.take(3)) == [(1, 1, 2), (1, 2, 3), (2, 3, 5)]
-    assert list(range(3) >> seq.slide(3)) == [(0, 1, 2)]
-    assert list(range(3) >> seq.slide(5)) == [(0, 1, 2)]

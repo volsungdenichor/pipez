@@ -1,11 +1,10 @@
 import builtins
-import collections
 import functools
 import itertools
 import operator
 
-from pipez.functions import to_unary, identity, apply, negate
-from pipez.pipe import pipeable
+from pipez.functions import to_unary, identity
+from pipez.pipe import as_pipeable, Not
 
 
 def _adjust_selectors(key_selector, value_selector):
@@ -18,51 +17,34 @@ def _adjust_selectors(key_selector, value_selector):
 # noinspection PyPep8Naming
 class seq:
     @staticmethod
-    @pipeable
+    @as_pipeable
     def len(iterable):
         return sum(1 for _ in iterable)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def map(iterable, func):
         func = to_unary(func)
         return builtins.map(func, iterable)
 
-    @staticmethod
-    def associate(func):
-        func = to_unary(func)
-        return seq.map(lambda item: (item, func(item)))
+    bind = map
 
     @staticmethod
-    def replace_if(pred, new_value):
-        pred = to_unary(pred)
-        return seq.map(lambda item: new_value if pred(item) else item)
-
-    @staticmethod
-    def replace(old_value, new_value):
-        return seq.replace_if(lambda item: item == old_value, new_value)
-
-    @staticmethod
-    @pipeable
+    @as_pipeable
     def take_if(iterable, pred):
         pred = to_unary(pred)
         return builtins.filter(pred, iterable)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def drop_if(iterable, pred):
         pred = to_unary(pred)
-        return iterable >> seq.take_if(negate(pred))
+        return iterable >> seq.take_if(Not(pred))
 
     filter = take_if
 
     @staticmethod
-    def exclude(other_iterable):
-        other_iterable = set(other_iterable)
-        return seq.drop_if(lambda x: x in other_iterable)
-
-    @staticmethod
-    @pipeable
+    @as_pipeable
     def slice(iterable, start, stop, step=None):
         return itertools.islice(iterable, start, stop, step)
 
@@ -79,48 +61,48 @@ class seq:
         return seq.slice(None, None, n)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def take_while(iterable, pred):
         pred = to_unary(pred)
         return itertools.takewhile(pred, iterable)
 
     @staticmethod
     def take_until(pred):
-        return seq.take_while(negate(to_unary(pred)))
+        return seq.take_while(Not(to_unary(pred)))
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def drop_while(iterable, pred):
         pred = to_unary(pred)
         return itertools.dropwhile(pred, iterable)
 
     @staticmethod
     def drop_until(pred):
-        return seq.drop_while(negate(to_unary(pred)))
+        return seq.drop_while(Not(to_unary(pred)))
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def enumerate(iterable, start=0):
         return builtins.enumerate(iterable, start=start)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def reverse(iterable):
         return builtins.reversed(iterable)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def sort(iterable, key=None, reverse=False):
         key = to_unary(key)
         return builtins.sorted(iterable, key=key, reverse=reverse)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def zip_with(iterable, other_iterable):
         return builtins.zip(iterable, other_iterable)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def flatten(iterable):
         return itertools.chain.from_iterable(iterable)
 
@@ -133,40 +115,40 @@ class seq:
         return seq.map(func) >> seq.filter(lambda item: item is not None)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def tee(iterable, n=2):
         return itertools.tee(iterable, n)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def partition(iterable, pred):
         s1, s2 = iterable >> seq.tee(2)
         return s1 >> seq.take_if(pred), s2 >> seq.drop_if(pred)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def all(iterable, pred=bool):
         return builtins.all(iterable >> seq.map(pred))
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def any(iterable, pred=bool):
         return builtins.any(iterable >> seq.map(pred))
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def none(iterable, pred=bool):
         return not builtins.any(iterable >> seq.map(pred))
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def for_each(iterable, func):
         func = to_unary(func)
         for item in iterable:
             func(item)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def inspect(iterable, func):
         func = to_unary(func)
         for item in iterable:
@@ -174,12 +156,12 @@ class seq:
             yield item
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def join(iterable, separator=''):
         return separator.join(iterable >> seq.map(str))
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def to(iterable, _class):
         return _class(iterable)
 
@@ -196,13 +178,13 @@ class seq:
         return seq.to(tuple)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def to_dict(iterable, key_selector=None, value_selector=None):
         key_selector, value_selector = _adjust_selectors(key_selector, value_selector)
         return {key_selector(item): value_selector(item) for item in iterable}
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def to_multidict(iterable, key_selector=None, value_selector=None):
         key_selector, value_selector = _adjust_selectors(key_selector, value_selector)
         res = {}
@@ -211,29 +193,29 @@ class seq:
         return res
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def reduce(iterable, func, init):
         return functools.reduce(func, iterable, init)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def sum(iterable):
         return builtins.sum(iterable)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def min(iterable, key=None):
         key = to_unary(key)
         return builtins.min(iterable, key=key)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def max(iterable, key=None):
         key = to_unary(key)
         return builtins.max(iterable, key=key)
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def first(iterable):
         return next(iter(iterable), None)
 
@@ -242,34 +224,6 @@ class seq:
         return seq.drop(n) >> seq.first()
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def extend(iterable, other_iterable):
         return itertools.chain(iterable, other_iterable)
-
-    @staticmethod
-    @pipeable
-    def chunk(iterable, chunk_size):
-        buffer = []
-        for item in iterable:
-            buffer.append(item)
-            if len(buffer) == chunk_size:
-                yield buffer
-                buffer = []
-        if buffer:
-            yield buffer
-
-    @staticmethod
-    @pipeable
-    def tail(iterable, n):
-        return iter(collections.deque(iterable, maxlen=n))
-
-    @staticmethod
-    @pipeable
-    def slide(iterable, n):
-        it = iter(iterable)
-        window = collections.deque(itertools.islice(it, n), maxlen=n)
-        if len(window) <= n:
-            yield tuple(window)
-        for x in it:
-            window.append(x)
-            yield tuple(window)

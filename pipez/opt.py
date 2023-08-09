@@ -1,11 +1,11 @@
 from pipez.functions import to_unary
-from pipez.pipe import pipeable
+from pipez.pipe import as_pipeable
 
 
 # noinspection PyPep8Naming
 class opt:
     @staticmethod
-    @pipeable
+    @as_pipeable
     def map(obj, func):
         func = to_unary(func)
         return func(obj) if obj is not None else None
@@ -13,23 +13,23 @@ class opt:
     bind = map
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def filter(obj, pred):
         pred = to_unary(pred)
         return obj if obj is not None and pred(obj) else None
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def value_or(obj, default_value):
         return obj if obj is not None else default_value
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def value_or_eval(obj, func):
         return obj if obj is not None else func()
 
     @staticmethod
-    @pipeable
+    @as_pipeable
     def value_or_raise(obj, exception):
         if obj is not None:
             return obj
