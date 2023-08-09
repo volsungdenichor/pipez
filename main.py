@@ -5,10 +5,9 @@ from operator import itemgetter
 
 import yaml
 
-from pipez import seq
-from pipez.functions import identity, to_unary
-from pipez.pipe import pipeable, fn, call
-from pipez.predicates import predicates
+from pipez import seq, predicates
+from pipez.pipe import as_pipeable, All, fn
+from pipez.predicates import eq
 
 
 def parse_chunk(s: str):
@@ -64,7 +63,7 @@ class Path:
         return all(a == b for a, b in zip(self._path, other._path))
 
 
-@pipeable
+@as_pipeable
 def visit(obj, path=None):
     path = path or Path()
     yield obj, path
@@ -78,14 +77,6 @@ def visit(obj, path=None):
 
 get_value = itemgetter(0)
 get_path = itemgetter(1)
-
-
-class All:
-    def __init__(self, *preds):
-        self.preds = tuple(map(to_unary, preds))
-
-    def __call__(self, *args, **kwargs):
-        return all(p(*args, **kwargs) for p in self.preds)
 
 
 def value_is(searched_value, op=None):
@@ -128,11 +119,11 @@ class Vault:
                     yield Note(path=os.path.join(root, file), root=self._directory)
 
 
-@pipeable
+@as_pipeable
 def find_parents(vault: Vault, node):
     for note in vault.notes():
         for data in note.data():
-            if data >> visit() >> seq.any(All(value_is(node), path_is('children.*'))):
+            if data >> visit() >> predicates.contains(All(value_is(node), path_is('children.*'))):
                 return (data
                         >> visit()
                         >> seq.filter(path_is('parents.*'))
@@ -141,11 +132,11 @@ def find_parents(vault: Vault, node):
     return []
 
 
-@pipeable
+@as_pipeable
 def find_siblings(vault: Vault, node):
     for note in vault.notes():
         for data in note.data():
-            if data >> visit() >> seq.any(All(value_is(node), path_is('children.*'))):
+            if data >> visit() >> predicates.contains(All(value_is(node), path_is('children.*'))):
                 return (data
                         >> visit()
                         >> seq.filter(All(path_is('children.*'), value_is(node, operator.ne)))
@@ -154,7 +145,7 @@ def find_siblings(vault: Vault, node):
     return []
 
 
-@pipeable
+@as_pipeable
 def find_grandparents(vault: Vault, node):
     return (vault
             >> find_parents(node)
@@ -162,21 +153,12 @@ def find_grandparents(vault: Vault, node):
             >> seq.to_list())
 
 
-# vault = Vault(r'D:\Users\Krzysiek\Documents\test_notes')
-# (vault
-#  >> find_siblings('persons/Jan I Olbracht')
-#  >> call(json.dumps, indent=2)
-#  >> fn(print))
-# print('--')
-# (vault
-#  >> find_grandparents('persons/Jan I Olbracht')
-#  >> call(json.dumps, indent=2)
-#  >> fn(print))
+pipe = (find_siblings('persons/Jan I Olbracht')
+        >> fn(json.dumps, indent=2)
+        >> fn(print))
 
+print(pipe)
 
-neg = predicates.neg
-gt = predicates.gt
-r = predicates.contains(neg(gt(0)))
-col = [1, 2, 3]
-print(r)
-print(col >> r)
+vault = Vault(r'D:\Users\Krzysiek\Documents\test_notes')
+(vault >> pipe)
+print('--')

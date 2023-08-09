@@ -1,91 +1,59 @@
+import builtins
 import operator
 
-from pipez.pipe import as_pipeable
+from pipez import pipe
+from pipez.functions import to_unary
+from pipez.pipe import as_pipeable, Function, Pipeline
+
+eq = as_pipeable(operator.eq)
+ne = as_pipeable(operator.ne)
+lt = as_pipeable(operator.lt)
+gt = as_pipeable(operator.gt)
+le = as_pipeable(operator.le)
+ge = as_pipeable(operator.ge)
+
+all_of = pipe.All
+any_of = pipe.Any
+not_ = pipe.Not
+
+is_none = Function(lambda arg: arg is None)
 
 
-# noinspection PyPep8Naming
-class predicates:
-    @staticmethod
-    @as_pipeable
-    def eq(arg, value):
-        return operator.eq(arg, value)
+def result_of(func, pred):
+    return Pipeline(func, pred)
 
-    @staticmethod
-    @as_pipeable
-    def ne(arg, value):
-        return operator.ne(arg, value)
 
-    @staticmethod
-    @as_pipeable
-    def lt(arg, value):
-        return operator.lt(arg, value)
+def size_is(pred):
+    return result_of(len, pred)
 
-    @staticmethod
-    @as_pipeable
-    def le(arg, value):
-        return operator.le(arg, value)
 
-    @staticmethod
-    @as_pipeable
-    def gt(arg, value):
-        return operator.gt(arg, value)
+is_empty = size_is(0)
 
-    @staticmethod
-    @as_pipeable
-    def ge(arg, value):
-        return operator.ge(arg, value)
 
-    @staticmethod
-    @as_pipeable
-    def neg(arg, pred):
-        return not pred(arg)
+@as_pipeable
+def each(arg, pred):
+    pred = to_unary(pred)
+    return builtins.all(pred(a) for a in arg)
 
-    @staticmethod
-    @as_pipeable
-    def all(arg, *preds):
-        return all(p(arg) for p in preds)
 
-    @staticmethod
-    @as_pipeable
-    def any(arg, *preds):
-        return any(p(arg) for p in preds)
+@as_pipeable
+def contains(arg, pred):
+    pred = to_unary(pred)
+    return builtins.any(pred(a) for a in arg)
 
-    @staticmethod
-    @as_pipeable
-    def none(arg, *preds):
-        return not any(p(arg) for p in preds)
 
-    @staticmethod
-    @as_pipeable
-    def result_of(arg, func, pred):
-        return pred(func(arg))
+@as_pipeable
+def has_prefix(arg, prefix):
+    return arg[:len(prefix)] == prefix
 
-    @staticmethod
-    @as_pipeable
-    def len(arg, pred):
-        return arg >> predicates.result_of(len, pred)
 
-    @staticmethod
-    @as_pipeable
-    def is_empty(arg):
-        return not arg
+@as_pipeable
+def has_suffix(arg, suffix):
+    return arg[-len(suffix):] == suffix
 
-    @staticmethod
-    @as_pipeable
-    def each(arg, pred):
-        return all(pred(a) for a in arg)
 
-    @staticmethod
-    @as_pipeable
-    def contains(arg, pred):
-        return any(pred(a) for a in arg)
-
-    @staticmethod
-    @as_pipeable
-    def is_none(arg):
-        return arg is None
-
-    @staticmethod
-    @as_pipeable
-    def is_not_none(arg):
-        return arg is not None
+@as_pipeable
+def contains_subrange(arg, sub):
+    arg_len = len(arg)
+    sub_len = len(sub)
+    return arg_len >= sub_len and builtins.any(arg[i:i + sub_len] == sub for i in range(0, arg_len - sub_len + 1))

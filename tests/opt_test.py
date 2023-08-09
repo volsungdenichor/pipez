@@ -4,14 +4,16 @@ from pipez import opt
 
 
 def test_map():
-    assert 10 >> opt.map(lambda _: 10 * _) == 100
-    assert None >> opt.map(lambda _: 10 * _) is None
+    mul_10 = lambda _: 10 * _
+    assert 10 >> opt.map(mul_10) == 100
+    assert None >> opt.map(mul_10) is None
 
 
 def test_filter():
-    assert 9 >> opt.filter(lambda _: _ < 10) == 9
-    assert 11 >> opt.filter(lambda _: _ < 10) is None
-    assert None >> opt.filter(lambda _: _ < 10) is None
+    lt_10 = lambda _: _ < 10
+    assert 9 >> opt.filter(lt_10) == 9
+    assert 11 >> opt.filter(lt_10) is None
+    assert None >> opt.filter(lt_10) is None
 
 
 def test_value_or():

@@ -5,6 +5,7 @@ import operator
 
 from pipez.functions import to_unary, identity
 from pipez.pipe import as_pipeable, Not
+from pipez.predicates import is_none
 
 
 def _adjust_selectors(key_selector, value_selector):
@@ -112,7 +113,7 @@ class seq:
 
     @staticmethod
     def filter_map(func):
-        return seq.map(func) >> seq.filter(lambda item: item is not None)
+        return seq.map(func) >> seq.filter(~is_none)
 
     @staticmethod
     @as_pipeable
@@ -124,21 +125,6 @@ class seq:
     def partition(iterable, pred):
         s1, s2 = iterable >> seq.tee(2)
         return s1 >> seq.take_if(pred), s2 >> seq.drop_if(pred)
-
-    @staticmethod
-    @as_pipeable
-    def all(iterable, pred=bool):
-        return builtins.all(iterable >> seq.map(pred))
-
-    @staticmethod
-    @as_pipeable
-    def any(iterable, pred=bool):
-        return builtins.any(iterable >> seq.map(pred))
-
-    @staticmethod
-    @as_pipeable
-    def none(iterable, pred=bool):
-        return not builtins.any(iterable >> seq.map(pred))
 
     @staticmethod
     @as_pipeable
@@ -222,6 +208,10 @@ class seq:
     @staticmethod
     def nth(n):
         return seq.drop(n) >> seq.first()
+
+    @staticmethod
+    def count_if(pred):
+        return seq.filter(pred) >> seq.len()
 
     @staticmethod
     @as_pipeable

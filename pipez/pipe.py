@@ -1,6 +1,7 @@
 import functools
 
 from pipez.fmt import fmt
+from pipez.functions import to_unary
 
 
 def _flatten(args, getter):
@@ -27,7 +28,7 @@ class Pipeable:
 
 class Pipeline(Pipeable):
     def __init__(self, *pipes):
-        self._pipes = tuple(_flatten(pipes, lambda p: p._pipes if isinstance(p, Pipeline) else (p,)))
+        self._pipes = tuple(_flatten(pipes, lambda p: p._pipes if isinstance(p, Pipeline) else (to_unary(p),)))
 
     def __call__(self, arg):
         for p in self._pipes:
@@ -41,7 +42,7 @@ class Pipeline(Pipeable):
 
 class All(Pipeable):
     def __init__(self, *preds):
-        self._preds = tuple(_flatten(preds, lambda p: p._preds if isinstance(p, All) else (p,)))
+        self._preds = tuple(_flatten(preds, lambda p: p._preds if isinstance(p, All) else (to_unary(p),)))
 
     def __call__(self, arg):
         return all(p(arg) for p in self._preds)
@@ -52,7 +53,7 @@ class All(Pipeable):
 
 class Any(Pipeable):
     def __init__(self, *preds):
-        self._preds = tuple(_flatten(preds, lambda p: p._preds if isinstance(p, Any) else (p,)))
+        self._preds = tuple(_flatten(preds, lambda p: p._preds if isinstance(p, Any) else (to_unary(p),)))
 
     def __call__(self, arg):
         return any(p(arg) for p in self._preds)
@@ -63,7 +64,7 @@ class Any(Pipeable):
 
 class Not(Pipeable):
     def __init__(self, pred):
-        self._pred = pred
+        self._pred = to_unary(pred)
 
     def __call__(self, arg):
         return not self._pred(arg)

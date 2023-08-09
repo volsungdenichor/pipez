@@ -92,24 +92,6 @@ def test_partition():
     assert list(f) == [1, 3, 5, 7, 9]
 
 
-def test_all():
-    assert [] >> seq.all(lambda x: x >= 100)
-    assert range(100, 105) >> seq.all(lambda x: x >= 100)
-    assert not range(99, 104) >> seq.all(lambda x: x >= 100)
-
-
-def test_any():
-    assert not [] >> seq.any(lambda x: x >= 100)
-    assert range(100, 105) >> seq.any(lambda x: x >= 100)
-    assert range(99, 104) >> seq.any(lambda x: x >= 100)
-
-
-def test_none():
-    assert [] >> seq.none(lambda x: x >= 100)
-    assert not range(100, 105) >> seq.none(lambda x: x >= 100)
-    assert not range(99, 104) >> seq.none(lambda x: x >= 100)
-
-
 def test_join():
     assert range(5) >> seq.join() == "01234"
     assert range(5) >> seq.join(" ") == "0 1 2 3 4"
