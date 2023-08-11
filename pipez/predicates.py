@@ -17,6 +17,8 @@ any_of = pipe.Any
 not_ = pipe.Not
 
 is_none = Function(lambda arg: arg is None)
+always = Function(lambda _: True)
+never = Function(lambda _: False)
 
 
 def result_of(func, pred):
