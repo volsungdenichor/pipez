@@ -1,6 +1,4 @@
-import builtins
 import copy
-import dataclasses
 import datetime
 import itertools
 import json
@@ -8,14 +6,12 @@ import os
 import pathlib
 import typing
 from json import JSONEncoder
-from operator import attrgetter
+from operator import itemgetter
 
 import yaml
 
-from pipez import seq
-from pipez.operators import get_attr, get_attr, add, combine, mul, truediv, neg, get_first, get_value, get_item
+from pipez import seq, tap
 from pipez.pipe import fn
-from pipez.predicates import eq, gt
 
 
 class Path:
@@ -71,6 +67,9 @@ class Path:
         other = Path(other)
         return self._path == other._path
 
+    def is_unique(self):
+        return not any(p == Path.ANY for p in self)
+
 
 class Location:
     def __init__(self, value: typing.Any, path: Path):
@@ -96,6 +95,9 @@ def visit(obj: typing.Any) -> typing.Iterable[Location]:
                 yield from impl(value, path.child(key))
 
     yield from impl(obj, Path())
+
+
+LocationPredicate = typing.Callable[[Location], bool]
 
 
 class FindResult:
@@ -125,7 +127,7 @@ class FindResult:
     def __bool__(self) -> bool:
         return bool(self._result)
 
-    def where(self, pred: typing.Callable[[Location], bool]) -> 'FindResult':
+    def where(self, pred: LocationPredicate) -> 'FindResult':
         return FindResult(self._dct,
                           self.path,
                           [loc for loc in self if pred(loc)])
@@ -147,30 +149,53 @@ class FindResult:
     def sibling(self, p) -> 'FindResult':
         return FindResult(self._dct, self.path.sibling(p))
 
+    def siblings(self) -> 'FindResult':
+        return self.parent().child('*').where(lambda loc: loc.path != self.path)
+
 
 class Data:
     def __init__(self, dct):
         self._dct = dct
 
-    def __getitem__(self, item) -> FindResult:
-        return FindResult(self._dct, item)
-
     def __iter__(self) -> typing.Iterable[Location]:
         yield from visit(self._dct)
 
-    def _find_all(self, pred) -> typing.Iterable[FindResult]:
+    def _create_predicate(self,
+                          pred: LocationPredicate | typing.Any,
+                          path: typing.Optional[Path] = None) -> LocationPredicate:
+
         if not callable(pred):
-            value = copy.deepcopy(pred)
+            value_pred = lambda loc: loc.value == pred
+        else:
+            value_pred = pred
 
-            def result(o):
-                return o.value == value
+        if path is not None:
+            path_pred = lambda loc: loc.path.matches(path)
+        else:
+            path_pred = lambda loc: True
 
-            pred = result
+        def predicate(loc: Location) -> bool:
+            return value_pred(loc) and path_pred(loc)
 
-        return (FindResult(self._dct, item.path) for item in self if pred(item))
+        return predicate
 
-    def find(self, pred) -> list[Location]:
-        return list(itertools.chain.from_iterable(self._find_all(pred)))
+    def _find_all(self, pred: LocationPredicate) -> typing.Iterable[FindResult]:
+        return (FindResult(self._dct, loc.path) for loc in self if pred(loc))
+
+    def find(self,
+             pred: LocationPredicate | typing.Any,
+             path: typing.Optional[Path] = None) -> list[Location]:
+        predicate = self._create_predicate(pred, path)
+        return list(itertools.chain.from_iterable(self._find_all(predicate)))
+
+    def get(self, path) -> FindResult:
+        path = Path(path)
+        return FindResult(self._dct, path=path)
+
+    def __getitem__(self, path):
+        path = Path(path)
+        assert path.is_unique()
+        return next(iter(FindResult(self._dct, path=path).values), None)
 
     def __repr__(self):
         return str(self._dct)
@@ -187,12 +212,12 @@ class Note:
         self.location = location
 
     @property
-    def data(self) -> list[Data]:
+    def data(self) -> Data:
         if os.path.exists(self.location):
             with open(self.location, encoding='utf-8') as file:
-                return [Data(d) for d in yaml.safe_load_all(file)]
+                return Data(yaml.safe_load(file))
         else:
-            return []
+            return Data({})
 
     @property
     def full_name(self) -> str:
@@ -233,18 +258,18 @@ class Vault:
 
     def query(self, visitor):
         for note in self.notes():
-            for index, data in enumerate(note.data):
-                res = visitor(note, index, data)
-                if res is not None:
-                    yield res
+            data = note.data
+            res = visitor(note, data)
+            if res is not None:
+                yield res
 
-    def backlinks(self, value: Path) -> typing.Iterable[tuple[Note, int, list[Path]]]:
+    def backlinks(self, value: Path) -> typing.Iterable[tuple[Note, list[Path]]]:
         value = str(Path(value))
         for note in vault.notes():
-            for index, data in enumerate(note.data):
-                locs = data.find(value)
-                if locs:
-                    yield note, index, [loc.path for loc in locs]
+            data = note.data
+            locs = data.find(value)
+            if locs:
+                yield note, [loc.path for loc in locs]
 
     def _return_note(self, path: Path):
         return Note(path=path,
@@ -258,45 +283,67 @@ class Vault:
         return os.path.join(self._directory, os.sep.join(path)) + Vault.EXTENSION
 
 
-def find_parents(node):
-    def result(note: Note, index: int, data: Data):
-        for val, path in data.find(node):
-            if path.matches('children/*'):
-                return data['parents/*']
+def find_parents(vault: Vault, node):
+    def visitor(note: Note, data: Data):
+        for val, path in data.find(node, 'children/*'):
+            return data.get('parents/*').values
 
-    return result
-
-
-def find_siblings(node):
-    def result(note: Note, index: int, data: Data):
-        for val, path in data.find(node):
-            if path.matches('children/*'):
-                return data['children/*'].where(lambda it: it.path != path)
-
-    return result
+    for note in vault.notes():
+        if note.path.matches('genealogy/*'):
+            data = note.data
+            res = visitor(note, data)
+            if res is not None:
+                yield res
 
 
-def display(o):
-    print(f'{o} {type(o)}')
+def find_siblings(vault: Vault, node):
+    def visitor(note: Note, data: Data):
+        for val, path in data.find(node, 'children/*'):
+            return data.get('children/*').where(lambda it: it.path != path).values
+
+    for note in vault.notes():
+        if note.path.matches('genealogy/*'):
+            data = note.data
+            res = visitor(note, data)
+            if res is not None:
+                yield res
+
+
+def find_spouse_and_children(vault: Vault, node):
+    def visitor(note: Note, data: Data):
+        for val, path in data.find(node, 'parents/*'):
+            spouse = data.get(path).siblings().values[0]
+            children = data.get('children/*').values
+
+            for child in children:
+                yield spouse, child, vault[child].data['death']
+
+    for note in vault.notes():
+        if note.path.matches('genealogy/*'):
+            data = note.data
+            yield from visitor(note, data)
 
 
 vault = Vault(r'D:\Users\Krzysiek\Documents\test_notes')
 
-node = 'people/Stanisław Bareja'
-print(vault[node].full_name)
-for n, i, paths in vault.backlinks(node):
-    if n.path.matches('movies/*'):
-        data = n.data[i]
-        print(data['title'], data['year'])
-        for p in paths:
-            if p.matches('cast/*/actor'):
-                print('    aktor', data[p].sibling('character'), 'note:', data[p].sibling('note'), ' {', p, '}')
-            if p.matches('director'):
-                print('    reżyser')
-            if p.matches('story/*') or p.matches('story'):
-                print('    scenariusz')
-    print('---')
+(find_spouse_and_children(vault, 'people/Zygmunt Stary')
+ >> seq.for_each(print))
 
 print('---')
-for p in vault.query(find_siblings('persons/Jan I Olbracht')) >> seq.first():
-    display(p)
+(find_parents(vault, 'people/Zygmunt August')
+ >> seq.flatten()
+ >> seq.to_list()
+ >> fn(json.dumps, indent=2)
+ >> fn(print))
+
+print('---')
+(find_siblings(vault, 'people/Zygmunt August')
+ >> seq.flatten()
+ >> seq.to_list()
+ >> fn(json.dumps, indent=2)
+ >> fn(print))
+
+bareja = vault['people/Stanislaw Bareja']
+bareja.creation_time >> fn(print)
+bareja.modification_time >> fn(print)
+bareja.data['death'] >> fn(print)
