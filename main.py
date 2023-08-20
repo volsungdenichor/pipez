@@ -1,4 +1,5 @@
 import copy
+import dataclasses
 import datetime
 import itertools
 import json
@@ -67,6 +68,7 @@ class Path:
         other = Path(other)
         return self._path == other._path
 
+    @property
     def is_unique(self):
         return not any(p == Path.ANY for p in self)
 
@@ -75,6 +77,7 @@ class Location:
     def __init__(self, value: typing.Any, path: Path):
         self.value = value
         self.path = path
+        assert self.path.is_unique
 
     def __iter__(self):
         yield self.value
@@ -150,7 +153,7 @@ class FindResult:
         return FindResult(self._dct, self.path.sibling(p))
 
     def siblings(self) -> 'FindResult':
-        return self.parent().child('*').where(lambda loc: loc.path != self.path)
+        return self.parent().child('*').where(lambda loc: loc._searched_path != self.path)
 
 
 class Data:
@@ -170,7 +173,7 @@ class Data:
             value_pred = pred
 
         if path is not None:
-            path_pred = lambda loc: loc.path.matches(path)
+            path_pred = lambda loc: loc._searched_path.matches(path)
         else:
             path_pred = lambda loc: True
 
@@ -188,13 +191,18 @@ class Data:
         predicate = self._create_predicate(pred, path)
         return list(itertools.chain.from_iterable(self._find_all(predicate)))
 
+    def contains(self,
+                 pred: LocationPredicate | typing.Any,
+                 path: typing.Optional[Path] = None) -> bool:
+        return bool(self.find(pred, path))
+
     def get(self, path) -> FindResult:
         path = Path(path)
         return FindResult(self._dct, path=path)
 
     def __getitem__(self, path):
         path = Path(path)
-        assert path.is_unique()
+        assert path.is_unique
         return next(iter(FindResult(self._dct, path=path).values), None)
 
     def __repr__(self):
@@ -247,11 +255,22 @@ class Vault:
     def __init__(self, directory: os.path):
         self._directory = directory
 
-    def notes(self) -> typing.Iterable[Note]:
+    def notes(self, path: typing.Optional[Path] = None) -> typing.Iterable[Note]:
+        if path is not None:
+            path = Path(path)
+
+            def predicate(note: Note) -> bool:
+                return note.path.matches(path)
+        else:
+            def predicate(note: Note) -> bool:
+                return True
+
         for root, dirs, files, in os.walk(self._directory):
             for file in files:
                 if file.endswith(Vault.EXTENSION):
-                    yield self._return_note(self._location_to_path(os.path.join(root, file)))
+                    note = self._return_note(self._location_to_path(os.path.join(root, file)))
+                    if predicate(note):
+                        yield note
 
     def __getitem__(self, path):
         return self._return_note(Path(path))
@@ -284,44 +303,28 @@ class Vault:
 
 
 def find_parents(vault: Vault, node):
-    def visitor(note: Note, data: Data):
-        for val, path in data.find(node, 'children/*'):
+    for note in vault.notes('genealogy/*'):
+        data = note.data
+        if data.contains(node, 'children/*'):
             return data.get('parents/*').values
-
-    for note in vault.notes():
-        if note.path.matches('genealogy/*'):
-            data = note.data
-            res = visitor(note, data)
-            if res is not None:
-                yield res
 
 
 def find_siblings(vault: Vault, node):
-    def visitor(note: Note, data: Data):
+    for note in vault.notes('genealogy/*'):
+        data = note.data
         for val, path in data.find(node, 'children/*'):
-            return data.get('children/*').where(lambda it: it.path != path).values
-
-    for note in vault.notes():
-        if note.path.matches('genealogy/*'):
-            data = note.data
-            res = visitor(note, data)
-            if res is not None:
-                yield res
+            return data.get('children/*').where(lambda it: it._searched_path != path).values
 
 
 def find_spouse_and_children(vault: Vault, node):
-    def visitor(note: Note, data: Data):
+    for note in vault.notes('genealogy/*'):
+        data = note.data
         for val, path in data.find(node, 'parents/*'):
             spouse = data.get(path).siblings().values[0]
             children = data.get('children/*').values
 
             for child in children:
                 yield spouse, child, vault[child].data['death']
-
-    for note in vault.notes():
-        if note.path.matches('genealogy/*'):
-            data = note.data
-            yield from visitor(note, data)
 
 
 vault = Vault(r'D:\Users\Krzysiek\Documents\test_notes')
@@ -331,19 +334,10 @@ vault = Vault(r'D:\Users\Krzysiek\Documents\test_notes')
 
 print('---')
 (find_parents(vault, 'people/Zygmunt August')
- >> seq.flatten()
- >> seq.to_list()
  >> fn(json.dumps, indent=2)
  >> fn(print))
 
 print('---')
 (find_siblings(vault, 'people/Zygmunt August')
- >> seq.flatten()
- >> seq.to_list()
  >> fn(json.dumps, indent=2)
  >> fn(print))
-
-bareja = vault['people/Stanislaw Bareja']
-bareja.creation_time >> fn(print)
-bareja.modification_time >> fn(print)
-bareja.data['death'] >> fn(print)
