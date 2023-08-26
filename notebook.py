@@ -1,13 +1,18 @@
+import dataclasses
 import itertools
 import os
 import pathlib
 import typing
 from datetime import datetime
-from operator import itemgetter, attrgetter
+from operator import itemgetter
 
 import yaml
+from tabulate import tabulate
 
-from pipez import seq, opt
+from pipez import seq
+from pipez.operators import get_item
+from pipez.pipe import as_pipeable
+from pipez.predicates import any_of
 
 
 class Path:
@@ -54,10 +59,10 @@ class Path:
     def matches(self, other) -> bool:
         other = Path(other)
 
-        def m(a, b):
+        def chunks_match(a, b):
             return a == Path.ANY or b == Path.ANY or a == b
 
-        return len(self._path) == len(other._path) and all(m(s, o) for s, o in zip(self._path, other._path))
+        return len(self._path) == len(other._path) and all(chunks_match(s, o) for s, o in zip(self._path, other._path))
 
     def __eq__(self, other):
         other = Path(other)
@@ -68,18 +73,13 @@ class Path:
         return not any(p == Path.ANY for p in self)
 
 
+@dataclasses.dataclass
 class Location:
-    def __init__(self, value: typing.Any, path: Path):
-        self.value = value
-        self.path = path
-        assert self.path.is_unique
-
-    def __iter__(self):
-        yield self.value
-        yield self.path
+    value: object
+    path: Path
 
     def __repr__(self):
-        return str(tuple(self))
+        return f'{self.value}'
 
 
 LocationPredicate = typing.Callable[[Location], bool]
@@ -96,31 +96,34 @@ def visit(obj: typing.Any, path=None) -> typing.Iterable[Location]:
             yield from visit(value, path.child(key))
 
 
+def to_find_result(dct, loc: Location) -> 'FindResult':
+    assert loc.path.is_unique
+    return FindResult(dct, loc.path, [loc])
+
+
 class FindResult:
     def __init__(self,
-                 note: 'Note',
                  dct: typing.Any,
-                 searched_path: Path,
+                 path_or_pattern: Path,
                  locations: typing.Optional[list[Location]] = None):
-        self.note = note
         self._dct = dct
-        self._searched_path = searched_path
+        self._path_or_pattern = path_or_pattern
         if locations is not None:
             self._locations = locations
         else:
-            self._locations = [loc for loc in visit(self._dct) if loc.path.matches(self._searched_path)]
+            self._locations = [loc for loc in visit(self._dct) if loc.path.matches(self._path_or_pattern)]
 
-    def _to_find_result(self, loc: Location) -> 'FindResult':
-        return FindResult(self.note, self._dct, loc.path, [loc])
+    def _modify_path(self, new_path: Path):
+        return FindResult(self._dct, new_path)
 
     def __iter__(self) -> typing.Iterable['FindResult']:
-        return (self._to_find_result(loc) for loc in self._locations)
+        return (to_find_result(self._dct, loc) for loc in self._locations)
 
     def __repr__(self) -> str:
-        return str(self._locations)
-
-    # def __getitem__(self, item) -> 'FindResult':
-    #     return self._to_find_result(self._locations[item])
+        if not self:
+            return str(None)
+        else:
+            return ', '.join(str(loc) for loc in self._locations)
 
     def __len__(self) -> int:
         return len(self._locations)
@@ -129,88 +132,69 @@ class FindResult:
         return bool(self._locations)
 
     def where(self, pred: LocationPredicate) -> 'FindResult':
-        return FindResult(self.note,
-                          self._dct,
-                          self._searched_path,
+        return FindResult(self._dct,
+                          self._path_or_pattern,
                           [loc for loc in self if pred(loc)])
 
     def parent(self) -> 'FindResult':
-        return FindResult(self.note, self._dct, self._searched_path.parent())
+        return self._modify_path(self._path_or_pattern.parent())
 
     def child(self, p) -> 'FindResult':
-        return FindResult(self.note, self._dct, self._searched_path.child(p))
+        return self._modify_path(self._path_or_pattern.child(p))
 
     def sibling(self, p) -> 'FindResult':
-        return FindResult(self.note, self._dct, self._searched_path.sibling(p))
+        return self._modify_path(self._path_or_pattern.sibling(p))
 
     def siblings(self) -> 'FindResult':
-        return self.parent().child('*').where(lambda loc: loc._searched_path != self._searched_path)
+        return self.parent().child('*').where(lambda loc: loc.path != self._path_or_pattern)
+
+    def as_location(self) -> Location:
+        assert self.is_unique
+        return self._locations[0]
 
     @property
     def is_unique(self):
-        return self._searched_path.is_unique and len(self) == 1
+        return self._path_or_pattern.is_unique and len(self) == 1
 
     @property
     def path(self) -> Path:
-        assert self.is_unique
-        return self._locations[0].path
+        return self.as_location().path
 
     @property
     def value(self):
-        assert self.is_unique
-        return self._locations[0].value
-
-    def link(self) -> 'Note':
-        return self.note.vault[self.value]
+        return self.as_location().value
 
 
 class Data:
-    def __init__(self, note, dct):
-        self.note = note
+    def __init__(self, dct):
         self._dct = dct
 
     def __iter__(self) -> typing.Iterable[FindResult]:
-        return itertools.chain.from_iterable(
-            FindResult(note=self.note, dct=self._dct, searched_path=loc.path, locations=[loc])
-            for loc in visit(self._dct))
+        return itertools.chain.from_iterable(to_find_result(self._dct, loc) for loc in visit(self._dct))
 
-    def _find_all(self, pred: LocationPredicate) -> typing.Iterable[FindResult]:
-        return (find_result for find_result in self if pred(find_result))
-
-    def find(self, predicate: LocationPredicate) -> list[FindResult]:
-        return list(self._find_all(predicate))
-
-    def contains(self, predicate: LocationPredicate) -> bool:
-        return bool(self.find(predicate))
-
-    def get(self, path) -> FindResult:
+    def __getitem__(self, path) -> FindResult:
         path = Path(path)
-        return FindResult(note=self.note, dct=self._dct, searched_path=path)
-
-    def __getitem__(self, path) -> typing.Optional[FindResult]:
-        return next(iter(self.get(path)), None)
+        return FindResult(dct=self._dct, path_or_pattern=path)
 
     def __repr__(self):
         return str(self._dct)
 
 
+@dataclasses.dataclass
 class Note:
-    def __init__(self, vault, path: Path, file_location: os.path):
-        self.vault = vault
-        self.path = path
-        self.file_location = file_location
+    path: Path
+    file_location: os.path
+
+    def __bool__(self):
+        return os.path.exists(self.file_location)
 
     @property
     def data(self) -> Data:
-        if os.path.exists(self.file_location):
+        if self:
             with open(self.file_location, encoding='utf-8') as file:
-                # print('  >>> Loading from ', file.name)
-                return Data(self, yaml.safe_load(file))
+                return Data(yaml.safe_load(file))
         else:
-            return Data(self, {})
-
-    def from_data(self, func):
-        return func(self, self.data)
+            return Data({})
 
     @property
     def full_name(self) -> str:
@@ -222,10 +206,12 @@ class Note:
 
     @property
     def modification_time(self):
+        assert self
         return datetime.datetime.fromtimestamp(pathlib.Path(self.file_location).stat().st_mtime)
 
     @property
     def creation_time(self):
+        assert self
         return datetime.datetime.fromtimestamp(pathlib.Path(self.file_location).stat().st_ctime)
 
     def __str__(self):
@@ -250,8 +236,7 @@ class Vault:
         return self._return_note(Path(path))
 
     def _return_note(self, path: Path):
-        return Note(vault=self,
-                    path=path,
+        return Note(path=path,
                     file_location=self._path_to_location(path))
 
     def _location_to_path(self, location: os.path) -> Path:
@@ -269,29 +254,89 @@ def show(v):
     print(type(v), v)
 
 
-def get_family(node):
-    def get_person(rel_type):
-        val = opt.map(attrgetter('value'))
-
-        def result(n: Note, d: Data):
-            return node, rel_type, n.name, d['birth'] >> val, d['death'] >> val
-
-        return result
-
-    def pred(loc):
-        return loc.value == node and loc.path.matches('children/*')
-
-    for note in vault.notes():
-        if note.path.matches('genealogy/*'):
-            for loc in note.data.find(pred):
-                this = loc.link()
-                father, mother = (loc.parent().sibling('parents').child(str(i)) for i in range(2))
-                yield father.link().from_data(get_person('father'))
-                yield mother.link().from_data(get_person('mother'))
-                yield this.from_data(get_person('self'))
-                yield from (s.link().from_data(get_person('sibling')) for s in loc.siblings())
+@as_pipeable
+def path_is(loc: Location, path: Path):
+    return loc.path.matches(path)
 
 
-for item in get_family('people/Zygmunt August'):
-    print(item)
+@as_pipeable
+def value_is(loc: Location, value):
+    return loc.value == value
 
+
+where = seq.filter
+select = seq.map
+
+
+def get_family(vault: Vault, node):
+    def from_data(n: FindResult, rel_type: str):
+        assert isinstance(n, FindResult)
+        assert n.is_unique
+        note = vault[n.value]
+        data = note.data
+        return {
+            'relation': rel_type,
+            'note': note.full_name,
+            'birth': data['birth/date'],
+            'death': data['death/date'],
+            'icon': data['icon']
+        }
+
+    def create(note: Note, loc: FindResult):
+        father, mother = (loc.parent().parent().child(f'parents/{i}') for i in range(2))
+        yield loc, 'self'
+        yield father, 'father'
+        yield mother, 'mother'
+        yield from ((s, 'sibling') for s in loc.siblings())
+
+    for note in vault.notes() >> where(path_is('genealogy/*')):
+        for loc in note.data >> where(value_is(node) & path_is('children/*')):
+            for res, relation in create(note, loc):
+                yield from_data(res, relation)
+
+
+def get_parents(vault: Vault, node):
+    def from_data(n: FindResult, rel_type: str):
+        assert isinstance(n, FindResult)
+        assert n.is_unique
+        note = vault[n.value]
+        data = note.data
+        return {
+            'relation': rel_type,
+            'note': note.full_name,
+            'birth': data['birth/date'],
+            'death': data['death/date'],
+            'icon': data['icon']
+        }
+
+    def get_rels(loc):
+        return ({0: 'father', 1: 'mother'}.items()
+                >> seq.map(lambda i, rel: (loc.parent().parent().child(f'parents/{i}'), rel)))
+
+    def get(note):
+        return (note.data
+                >> where(value_is(node) & path_is('children/*'))
+                >> seq.flat_map(get_rels)
+                >> seq.map(from_data))
+
+    return (vault.notes()
+            >> where(path_is('genealogy/*'))
+            >> seq.flat_map(get))
+
+
+def get_grandparents(vault: Vault, node):
+    def create(parent, grandparent):
+        return {
+            'relation': parent['relation'] + '\'s ' + grandparent['relation'],
+            'note': grandparent['note'],
+            'birth': grandparent['birth'],
+            'death': grandparent['death'],
+            'icon': grandparent['icon']}
+
+    for parent in get_parents(vault, node):
+        yield parent
+        yield from get_parents(vault, parent['note']) >> select(lambda gp: create(parent, gp))
+
+
+print(tabulate(get_family(vault, 'people/Zygmunt Stary')))
+print(tabulate(get_grandparents(vault, 'people/Zygmunt Stary')))
