@@ -1,3 +1,4 @@
+import functools
 import itertools
 import operator
 import typing
@@ -46,26 +47,6 @@ class BindRight(Bind):
         return self.func(*args, *self.args)
 
 
-class Callable:
-    def __init__(self, func, arity=None):
-        self.func = func
-        self.arity = arity
-
-    def __call__(self, *args):
-        if self.arity is not None:
-            if len(args) == self.arity:
-                return self.func(*args)
-            if len(args) < self.arity:
-                return Callable(BindRight(self.func, *args), arity=self.arity - len(args))
-            if len(args) > self.arity:
-                raise RuntimeError(f'Too many params to {self.func}: expected {self.arity}, got {len(args)}')
-
-        return self.func(*args)
-
-    def __repr__(self):
-        return str(self.func)
-
-
 class Pipe:
     def __init__(self, *funcs):
         self.funcs = funcs
@@ -76,6 +57,24 @@ class Pipe:
         for f in tail:
             res = f(res)
         return res
+
+
+class Callable:
+    def __init__(self, func, arity=None):
+        self.func = func
+        self.arity = arity
+
+    def __call__(self, *args):
+        if self.arity is not None:
+            args_len = len(args)
+            if args_len == self.arity:
+                return self.func(*args)
+            if args_len < self.arity:
+                return Callable(BindRight(self.func, *args), arity=self.arity - args_len)
+            if args_len > self.arity:
+                raise RuntimeError(f'Too many params to {self.func}: expected {self.arity}, got {args_len}')
+
+        return self.func(*args)
 
 
 def is_quoted_string(s: str) -> bool:
@@ -146,9 +145,6 @@ class Lambda:
             return evaluate(self.body, Env(dict(zip(self.params, a)), outer=self.env))
 
         return Callable(result, arity=len(self.params))(*args)
-
-    def __repr__(self):
-        return 'lambda: ' + str(self.params) + ", " + str(self.body)
 
 
 def get_delimited(symbol, args):
@@ -233,16 +229,18 @@ env = Env({
     '<=': Callable(operator.le, arity=2),
     '>': Callable(operator.gt, arity=2),
     '>=': Callable(operator.ge, arity=2),
+    '||': Callable(operator.or_, arity=2),
+    '&&': Callable(operator.and_, arity=2),
     'len': Callable(len, arity=1),
     'print': Callable(print, arity=1),
     'apply': Callable(lambda func, lst: func(*lst), arity=2),
     'car': Callable(lambda x: x[0], arity=1),
     'cdr': Callable(lambda x: x[1:], arity=1),
     'cons': Callable(lambda x, y: [x] + y, arity=2),
-    'list': Callable(lambda *args: list(args), arity=None),
-    'dict': Callable(lambda *args: {args[2 * i]: args[2 * i + 1] for i in range(len(args) // 2)}, arity=None),
-    '<:': BindLeft,
-    ':>': BindRight,
+    'bind_lt': BindLeft,
+    'bind_rt': BindRight,
+    'seq.foldl': Callable(lambda seq, func, init: functools.reduce(func, seq, init), arity=3),
+    'seq.foldr': Callable(lambda seq, func, init: functools.reduce(lambda x, y: func(y, x), reversed(seq), init), arity=3),
     'seq.map': Callable(lambda seq, func: list(map(func, seq)), arity=2),
     'seq.filter': Callable(lambda seq, pred: list(filter(pred, seq)), arity=2),
     'seq.take': Callable(lambda seq, n: list(itertools.islice(seq, None, n)), arity=2),

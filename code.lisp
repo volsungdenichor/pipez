@@ -39,10 +39,21 @@
         |]
         ]
 
-       [age := [[p] -> [- [if [in p "death"] [@ p "death"] 2023] [@ p "birth"]] ]]
+       [age := [ [p] -> [
+            - [if [in p "death"] [@ p "death"] 2023]
+              [@ p "birth"]]
+            ]
+        ]
+
+    [ seq.any_of := [ [pred] -> [ [ seq.map [pred] ] >> [ seq.foldl || False ] ] ] ]
+       [ seq.all_of := [ [pred] -> [ [ seq.map [pred] ] >> [ seq.foldl && True ] ] ] ]
+       [ seq.count_if := [ [pred] -> [ [ seq.map [pred] ] >> [ seq.foldl + 0 ] ] ] ]
 
        [persons
-           |> [ seq.filter [and [| [ age >> [ < 60 ] ] [ [ @ "first_name" ] >> [ == "Adam" ] ] |] ] ]
+           |> [ seq.filter [and [|
+                    [ age >> [ < 60 ] ] 
+                    [ [ @ "first_name" ] >> [ == "Adam" ] ] 
+                |] ] ]
            |> [ seq.map [ ap age [ @ "last_name" ] [ @ "first_name" ] ] ]
        ]
 ]
