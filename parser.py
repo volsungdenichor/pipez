@@ -1,13 +1,45 @@
-import string
+import dataclasses
 import typing
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
+
+
+@dataclasses.dataclass
+class Token:
+    text: str
+    pos: tuple[int, int]
+
+
+class Text:
+    def __init__(self, text: str):
+        self._text = text
+        self._index = 0
+        self._pos = 0, 0
+
+    def __bool__(self):
+        return self._index < len(self._text)
+
+    def text(self) -> str:
+        return self._text[self._index:]
+
+    def peek(self) -> Token:
+        return Token(text=self._text[self._index], pos=self._pos)
+
+    def read(self) -> Token:
+        res = self.peek()
+        if self._text[self._index] == '\n':
+            self._pos = 0, self._pos[1] + 1
+        else:
+            self._pos = self._pos[0] + 1, self._pos[1]
+        self._index += 1
+        return res
 
 
 @dataclass
 class ParseResult:
     text: str
     remainder: str
+    parser: 'Parser'
 
 
 class Parser(ABC):
@@ -15,70 +47,90 @@ class Parser(ABC):
     def parse(self, text: str) -> typing.Optional[ParseResult]:
         ...
 
-    def __call__(self, text: str) -> typing.Optional[ParseResult]:
-        return self.parse(text)
+    def alias(self, name):
+        return Alias(self, name)
 
-    def __rshift__(self, other):
-        return SequenceParser(self, other)
-
-    def __or__(self, other):
-        return AnyParser(self, other)
+    def create_result(self, text: str, remainder: str) -> ParseResult:
+        return ParseResult(text=text, remainder=remainder, parser=self)
 
 
-class CharParser(Parser):
+class Alias(Parser):
+    def __init__(self, parser: Parser, name: str):
+        assert isinstance(parser, Parser)
+        self._parser = parser
+        self._name = name
+
+    def parse(self, text: str) -> typing.Optional[ParseResult]:
+        res = self._parser.parse(text)
+        if res is not None:
+            return self.create_result(text=res.text, remainder=res.remainder)
+        else:
+            return None
+
+    def __repr__(self):
+        return self._name
+
+
+class Char(Parser):
     def __init__(self, pred: typing.Callable[[str], bool]):
-        self._pred = pred
+        if callable(pred):
+            self._pred = pred
+        else:
+            self._pred = lambda ch: ch == pred
 
     def parse(self, text: str) -> typing.Optional[ParseResult]:
         if text and self._pred(text[0]):
-            return ParseResult(text=text[0], remainder=text[1:])
+            return self.create_result(text=text[0], remainder=text[1:])
         else:
             return None
 
 
-class StringParser(Parser):
+class String(Parser):
     def __init__(self, string):
         self._string = string
 
     def parse(self, text: str) -> typing.Optional[ParseResult]:
         if text and text.startswith(self._string):
             length = len(self._string)
-            return ParseResult(text=text[:length], remainder=text[length:])
+            return self.create_result(text=text[:length], remainder=text[length:])
         else:
             return None
 
 
-class AnyParser(Parser):
+class Any(Parser):
     def __init__(self, *parsers: Parser):
+        assert all(isinstance(p, Parser) for p in parsers)
         self._parsers = parsers
 
     def parse(self, text: str) -> typing.Optional[ParseResult]:
         for parser in self._parsers:
-            res = parser(text)
+            res = parser.parse(text)
             if res is not None:
                 return res
         return None
 
 
-class SequenceParser(Parser):
+class Seq(Parser):
     def __init__(self, *parsers: Parser):
+        assert all(isinstance(p, Parser) for p in parsers)
         self._parsers = parsers
 
     def parse(self, text: str) -> typing.Optional[ParseResult]:
         remainder = text
         result = ''
         for parser in self._parsers:
-            res = parser(remainder)
+            res = parser.parse(remainder)
             if res is not None:
                 remainder = res.remainder
                 result += res.text
             else:
                 return None
-        return ParseResult(text=result, remainder=remainder)
+        return self.create_result(text=result, remainder=remainder)
 
 
-class RepeatedParser(Parser):
+class Repeat(Parser):
     def __init__(self, parser: Parser, pred: typing.Callable[[int], bool] = None):
+        assert isinstance(parser, Parser)
         self._parser = parser
         if pred is not None:
             self._pred = pred
@@ -90,7 +142,7 @@ class RepeatedParser(Parser):
         remainder = text
         result = ''
         while remainder:
-            res = self._parser(remainder)
+            res = self._parser.parse(remainder)
             if res is not None:
                 count += 1
                 remainder = res.remainder
@@ -99,110 +151,103 @@ class RepeatedParser(Parser):
                 break
 
         if self._pred(count):
-            return ParseResult(text=result, remainder=remainder)
+            return self.create_result(text=result, remainder=remainder)
         else:
             return None
 
 
-class OptionalParser(Parser):
+class Optional(Parser):
     def __init__(self, parser: Parser):
+        assert isinstance(parser, Parser)
         self._parser = parser
 
     def parse(self, text: str) -> typing.Optional[ParseResult]:
-        res = self._parser(text)
+        res = self._parser.parse(text)
         if res is not None:
             return res
         else:
-            return ParseResult(text='', remainder=text)
+            return self.create_result(text='', remainder=text)
 
 
-class QuotedStringParser(Parser):
+class QuotedString(Parser):
+    QUOTATION_MARK = '"'
+
     def parse(self, text: str) -> typing.Optional[ParseResult]:
-        quotation_mark = '"'
-        if text[0] != quotation_mark:
+        if text[0] != type(self).QUOTATION_MARK:
             return None
-        result = quotation_mark
-        txt = text[1:]
-        while txt:
-            if txt.startswith('\\"'):
-                result += quotation_mark
-                txt = txt[2:]
-            elif txt[0] == quotation_mark:
-                result += quotation_mark
-                txt = txt[1:]
+        result = type(self).QUOTATION_MARK
+        remainder = text[1:]
+        while remainder:
+            if remainder.startswith('\\' + type(self).QUOTATION_MARK):
+                result += type(self).QUOTATION_MARK
+                remainder = remainder[2:]
+            elif remainder[0] == type(self).QUOTATION_MARK:
+                result += type(self).QUOTATION_MARK
+                remainder = remainder[1:]
                 break
             else:
-                result += txt[0]
-                txt = txt[1:]
-        return ParseResult(text=result, remainder=txt)
+                result += remainder[0]
+                remainder = remainder[1:]
+        return self.create_result(text=result, remainder=remainder)
+
+    def __repr__(self):
+        return 'QuotedString'
 
 
-def char(ch):
-    if callable(ch):
-        return CharParser(ch)
-    elif isinstance(ch, str):
-        return CharParser(lambda c: c == ch)
+Whitespace = Repeat(Char(str.isspace)).alias('Whitespace')
 
+Literal = Seq(Char(str.isalpha),
+              Repeat(Char(str.isalnum))).alias('Literal')
 
-any_of = AnyParser
-string = StringParser
+Sign = Char(lambda c: c in ('+', '-'))
+Digit = Char(str.isdigit)
 
-repeat = RepeatedParser
-optional = OptionalParser
+FloatingPoint = Seq(Optional(Sign),
+                    Repeat(Digit),
+                    Char('.'),
+                    Repeat(Digit)).alias('FloatingPoint')
 
-whitespace = repeat(char(str.isspace))
+Integer = Seq(Optional(Sign),
+              Repeat(Digit)).alias('Integer')
 
-literal = char(str.isalpha) \
-          >> repeat(char(str.isalnum))
+Number = Any(FloatingPoint, Integer).alias('Number')
 
-sign = char(lambda c: c in ('+', '-'))
-digit = char(str.isdigit)
+OpeningBracket = Char('[').alias('OpeningBracket')
+ClosingBracket = Char(']').alias('ClosingBracket')
 
-floating_point = optional(sign) \
-                 >> repeat(digit) \
-                 >> char('.') \
-                 >> repeat(digit)
-
-integer = optional(sign) \
-          >> repeat(digit)
-
-number = floating_point | integer
-quoted_string = QuotedStringParser()
-
-opening_bracket = char('[')
-closing_bracket = char(']')
-
-parser = whitespace
-
-operator = any_of(
-    string("+"),
-    string("-"),
-    string("*"),
-    string("/"),
-    string("^"),
-    string("=="),
-    string("!="),
-    string("<"),
-    string("<="),
-    string(">"),
-    string(">="))
+Operator = Any(
+    String("+"),
+    String("-"),
+    String("*"),
+    String("/"),
+    String("^"),
+    String("=="),
+    String("!="),
+    String("<"),
+    String("<="),
+    String(">"),
+    String(">=")).alias('Operator')
 
 text = \
     """
     "Ala ma\n
-    kota" 123.9 a12 12 [ ala ma kota] 
+    kota" 123.9 a12 * 12 [ ala ma kota] 
     """
 
 
 def tokenize(text: str) -> typing.Iterable[str]:
-    parsers = any_of(opening_bracket, closing_bracket, number, quoted_string, literal, operator)
+    parsers = Any(Whitespace, OpeningBracket, ClosingBracket, Number, QuotedString(), Literal, Operator)
     while text:
-        text = text.strip()
-        res = parsers(text)
+        # text = text.strip()
+        res = parsers.parse(text)
         if res is not None:
             text = res.remainder
-            yield res.text.strip()
+            yield res.text, res.parser
 
 
-for token in tokenize(text):
-    print(token)
+# for token in tokenize(text):
+#     print(token)
+
+txt = Text(text)
+while txt:
+    print(txt.read())

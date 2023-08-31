@@ -16,6 +16,9 @@ class Pipeable:
     def __rrshift__(self, other):
         return self(other)
 
+    def __lshift__(self, other):
+        return self(other)
+
     def __and__(self, other):
         return All(self, other)
 
