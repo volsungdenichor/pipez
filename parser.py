@@ -3,55 +3,68 @@ import typing
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
 
+Position = tuple[int, int]
+
 
 @dataclasses.dataclass
 class Token:
     text: str
-    pos: tuple[int, int]
+    pos: Position
 
 
-class Text:
-    def __init__(self, text: str):
+class Stream:
+    def __init__(self, text: str, index: int = None, pos: Position = None):
         self._text = text
-        self._index = 0
-        self._pos = 0, 0
+        self._index = index or 0
+        self.pos = pos or (0, 0)
 
     def __bool__(self):
         return self._index < len(self._text)
 
-    def text(self) -> str:
+    @property
+    def content(self) -> str:
         return self._text[self._index:]
 
-    def peek(self) -> Token:
-        return Token(text=self._text[self._index], pos=self._pos)
+    def at(self, index: int):
+        return self._text[self._index + index]
 
-    def read(self) -> Token:
-        res = self.peek()
-        if self._text[self._index] == '\n':
-            self._pos = 0, self._pos[1] + 1
-        else:
-            self._pos = self._pos[0] + 1, self._pos[1]
-        self._index += 1
+    def peek(self) -> Token:
+        return Token(text=self.at(0), pos=self.pos)
+
+    def advance(self, count: int):
+        res = Stream(text=self._text, index=self._index, pos=self.pos)
+        while res and count > 0:
+            if res._text[res._index] == '\n':
+                res.pos = res.pos[0] + 1, 0
+            else:
+                res.pos = res.pos[0], res.pos[1] + 1
+            res._index += 1
+            count -= 1
         return res
+
+    def take(self, count: int) -> tuple[Token, 'Stream']:
+        token = Token(self.content[:count], pos=self.pos)
+        remainder = self.advance(count)
+        return token, remainder
+
+    def __repr__(self):
+        return self.content
 
 
 @dataclass
 class ParseResult:
-    text: str
-    remainder: str
+    token: Token
+    remainder: Stream
     parser: 'Parser'
 
 
 class Parser(ABC):
     @abstractmethod
-    def parse(self, text: str) -> typing.Optional[ParseResult]:
+    def parse(self, stream: Stream) -> typing.Optional[ParseResult]:
         ...
 
     def alias(self, name):
         return Alias(self, name)
-
-    def create_result(self, text: str, remainder: str) -> ParseResult:
-        return ParseResult(text=text, remainder=remainder, parser=self)
 
 
 class Alias(Parser):
@@ -60,10 +73,12 @@ class Alias(Parser):
         self._parser = parser
         self._name = name
 
-    def parse(self, text: str) -> typing.Optional[ParseResult]:
-        res = self._parser.parse(text)
+    def parse(self, stream: Stream) -> typing.Optional[ParseResult]:
+        res = self._parser.parse(stream)
         if res is not None:
-            return self.create_result(text=res.text, remainder=res.remainder)
+            return ParseResult(token=res.token,
+                               remainder=res.remainder,
+                               parser=self)
         else:
             return None
 
@@ -78,9 +93,12 @@ class Char(Parser):
         else:
             self._pred = lambda ch: ch == pred
 
-    def parse(self, text: str) -> typing.Optional[ParseResult]:
-        if text and self._pred(text[0]):
-            return self.create_result(text=text[0], remainder=text[1:])
+    def parse(self, stream: Stream) -> typing.Optional[ParseResult]:
+        if stream and self._pred(stream.peek().text):
+            token, remainder = stream.take(1)
+            return ParseResult(token=token,
+                               remainder=remainder,
+                               parser=self)
         else:
             return None
 
@@ -89,10 +107,12 @@ class String(Parser):
     def __init__(self, string):
         self._string = string
 
-    def parse(self, text: str) -> typing.Optional[ParseResult]:
-        if text and text.startswith(self._string):
-            length = len(self._string)
-            return self.create_result(text=text[:length], remainder=text[length:])
+    def parse(self, stream: Stream) -> typing.Optional[ParseResult]:
+        if stream and stream.content.startswith(self._string):
+            token, remainder = stream.take(len(self._string))
+            return ParseResult(token=token,
+                               remainder=remainder,
+                               parser=self)
         else:
             return None
 
@@ -102,9 +122,9 @@ class Any(Parser):
         assert all(isinstance(p, Parser) for p in parsers)
         self._parsers = parsers
 
-    def parse(self, text: str) -> typing.Optional[ParseResult]:
+    def parse(self, stream: Stream) -> typing.Optional[ParseResult]:
         for parser in self._parsers:
-            res = parser.parse(text)
+            res = parser.parse(stream)
             if res is not None:
                 return res
         return None
@@ -115,17 +135,20 @@ class Seq(Parser):
         assert all(isinstance(p, Parser) for p in parsers)
         self._parsers = parsers
 
-    def parse(self, text: str) -> typing.Optional[ParseResult]:
-        remainder = text
-        result = ''
+    def parse(self, stream: Stream) -> typing.Optional[ParseResult]:
+        remainder = stream
+        length = 0
         for parser in self._parsers:
             res = parser.parse(remainder)
             if res is not None:
                 remainder = res.remainder
-                result += res.text
+                length += len(res.token.text)
             else:
                 return None
-        return self.create_result(text=result, remainder=remainder)
+        token, remainder = stream.take(length)
+        return ParseResult(token=token,
+                           remainder=remainder,
+                           parser=self)
 
 
 class Repeat(Parser):
@@ -137,21 +160,24 @@ class Repeat(Parser):
         else:
             self._pred = lambda n: n > 0
 
-    def parse(self, text: str) -> typing.Optional[ParseResult]:
+    def parse(self, stream: Stream) -> typing.Optional[ParseResult]:
         count = 0
-        remainder = text
-        result = ''
+        remainder = stream
+        length = 0
         while remainder:
             res = self._parser.parse(remainder)
             if res is not None:
                 count += 1
                 remainder = res.remainder
-                result += res.text
+                length += len(res.token.text)
             else:
                 break
 
         if self._pred(count):
-            return self.create_result(text=result, remainder=remainder)
+            token, remainder = stream.take(length)
+            return ParseResult(token=token,
+                               remainder=remainder,
+                               parser=self)
         else:
             return None
 
@@ -161,93 +187,38 @@ class Optional(Parser):
         assert isinstance(parser, Parser)
         self._parser = parser
 
-    def parse(self, text: str) -> typing.Optional[ParseResult]:
-        res = self._parser.parse(text)
+    def parse(self, stream: Stream) -> typing.Optional[ParseResult]:
+        res = self._parser.parse(stream)
         if res is not None:
             return res
         else:
-            return self.create_result(text='', remainder=text)
+            return ParseResult(token=Token(text='', pos=stream.pos),
+                               remainder=stream,
+                               parser=self)
 
 
 class QuotedString(Parser):
     QUOTATION_MARK = '"'
 
-    def parse(self, text: str) -> typing.Optional[ParseResult]:
-        if text[0] != type(self).QUOTATION_MARK:
+    def parse(self, stream: Stream) -> typing.Optional[ParseResult]:
+        if stream.peek().text != type(self).QUOTATION_MARK:
             return None
         result = type(self).QUOTATION_MARK
-        remainder = text[1:]
+        remainder = stream.advance(1)
         while remainder:
-            if remainder.startswith('\\' + type(self).QUOTATION_MARK):
+            if remainder.content.startswith('\\' + type(self).QUOTATION_MARK):
                 result += type(self).QUOTATION_MARK
-                remainder = remainder[2:]
-            elif remainder[0] == type(self).QUOTATION_MARK:
+                remainder = remainder.advance(2)
+            elif remainder.content[0] == type(self).QUOTATION_MARK:
                 result += type(self).QUOTATION_MARK
-                remainder = remainder[1:]
+                remainder = remainder.advance(1)
                 break
             else:
-                result += remainder[0]
-                remainder = remainder[1:]
-        return self.create_result(text=result, remainder=remainder)
+                result += remainder.peek().text
+                remainder = remainder.advance(1)
+        return ParseResult(token=Token(text=result, pos=stream.peek().pos),
+                           remainder=remainder,
+                           parser=self)
 
     def __repr__(self):
         return 'QuotedString'
-
-
-Whitespace = Repeat(Char(str.isspace)).alias('Whitespace')
-
-Literal = Seq(Char(str.isalpha),
-              Repeat(Char(str.isalnum))).alias('Literal')
-
-Sign = Char(lambda c: c in ('+', '-'))
-Digit = Char(str.isdigit)
-
-FloatingPoint = Seq(Optional(Sign),
-                    Repeat(Digit),
-                    Char('.'),
-                    Repeat(Digit)).alias('FloatingPoint')
-
-Integer = Seq(Optional(Sign),
-              Repeat(Digit)).alias('Integer')
-
-Number = Any(FloatingPoint, Integer).alias('Number')
-
-OpeningBracket = Char('[').alias('OpeningBracket')
-ClosingBracket = Char(']').alias('ClosingBracket')
-
-Operator = Any(
-    String("+"),
-    String("-"),
-    String("*"),
-    String("/"),
-    String("^"),
-    String("=="),
-    String("!="),
-    String("<"),
-    String("<="),
-    String(">"),
-    String(">=")).alias('Operator')
-
-text = \
-    """
-    "Ala ma\n
-    kota" 123.9 a12 * 12 [ ala ma kota] 
-    """
-
-
-def tokenize(text: str) -> typing.Iterable[str]:
-    parsers = Any(Whitespace, OpeningBracket, ClosingBracket, Number, QuotedString(), Literal, Operator)
-    while text:
-        # text = text.strip()
-        res = parsers.parse(text)
-        if res is not None:
-            text = res.remainder
-            yield res.text, res.parser
-
-
-# for token in tokenize(text):
-#     print(token)
-
-txt = Text(text)
-while txt:
-    print(txt.read())

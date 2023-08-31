@@ -3,6 +3,8 @@ import itertools
 import operator
 import typing
 
+from parser import Repeat, Char, Any, Optional, Seq, Stream, Token, QuotedString
+
 
 class Env(dict):
     def __init__(self, values, outer=None):
@@ -79,59 +81,6 @@ class Callable:
 
 def is_quoted_string(s: str) -> bool:
     return s.startswith('"') and s.endswith('"')
-
-
-def tokenize(text: str) -> typing.Iterable[str]:
-    def replace(s: str) -> typing.Iterable[str]:
-        if is_quoted_string(s):
-            yield s
-        else:
-            for ch in "[]":
-                s = s.replace(ch, f' {ch} ')
-            yield from s.split()
-
-    import shlex
-    yield from itertools.chain.from_iterable(replace(s) for s in shlex.split(text, posix=False))
-
-
-def test_tokenize():
-    assert list(tokenize("Ala ma kota")) == ["Ala", "ma", "kota"]
-    assert list(tokenize("Ala \"ma\" kota")) == ["Ala", "\"ma\"", "kota"]
-    assert list(tokenize("Ala \"m[]a\" kota")) == ["Ala", "\"m[]a\"", "kota"]
-    assert list(tokenize("[ Ala ][ \"m[]a\" kota]]")) == ["[", "Ala", "]", "[", "\"m[]a\"", "kota", "]", "]"]
-    assert list(tokenize("[| 123 |]")) == ["[", "|", "123", "|", "]"]
-    assert list(tokenize("[|]")) == ["[", "|", "]"]
-
-
-def read(tokens: typing.Iterable[str]):
-    def atom(s: str):
-        for type_ in (int, float):
-            try:
-                return type_(s)
-            except ValueError:
-                pass
-        return s
-
-    res = []
-    for token in tokens:
-        if token == '[':
-            res.append(read(tokens))
-        elif token == ']':
-            break
-        else:
-            res.append(atom(token))
-    return res
-
-
-def remove_comments(text: str) -> str:
-    is_comment = lambda line: line.strip().startswith('#')
-    return '\n'.join(line for line in text.split('\n') if not is_comment(line))
-
-
-def parse(text: str):
-    tokens = tokenize(remove_comments(text))
-    tree = read(tokens)
-    return tree[0]
 
 
 class Lambda:
@@ -240,7 +189,8 @@ env = Env({
     'bind_lt': BindLeft,
     'bind_rt': BindRight,
     'seq.foldl': Callable(lambda seq, func, init: functools.reduce(func, seq, init), arity=3),
-    'seq.foldr': Callable(lambda seq, func, init: functools.reduce(lambda x, y: func(y, x), reversed(seq), init), arity=3),
+    'seq.foldr': Callable(lambda seq, func, init: functools.reduce(lambda x, y: func(y, x), reversed(seq), init),
+                          arity=3),
     'seq.map': Callable(lambda seq, func: list(map(func, seq)), arity=2),
     'seq.filter': Callable(lambda seq, pred: list(filter(pred, seq)), arity=2),
     'seq.take': Callable(lambda seq, n: list(itertools.islice(seq, None, n)), arity=2),
@@ -277,11 +227,67 @@ def display(obj, indent=0):
         print(f'{tab}{obj}')
 
 
-def load(path):
+Whitespace = Repeat(Char(str.isspace)).alias('Whitespace')
+
+Literal = Repeat(Char(lambda ch: not (ch in "[]" or ch.isspace()))).alias('Literal')
+
+Sign = Char(lambda c: c in ('+', '-'))
+Digit = Char(str.isdigit)
+
+FloatingPoint = Seq(Optional(Sign),
+                    Repeat(Digit),
+                    Char('.'),
+                    Repeat(Digit)).alias('FloatingPoint')
+
+Integer = Seq(Optional(Sign),
+              Repeat(Digit)).alias('Integer')
+
+OpeningBracket = Char('[').alias('OpeningBracket')
+ClosingBracket = Char(']').alias('ClosingBracket')
+
+
+def tokenize(text: Stream) -> typing.Iterable[Token]:
+    parsers = Any(Whitespace, OpeningBracket, ClosingBracket, FloatingPoint, Integer, QuotedString(), Literal)
+    while text:
+        res = parsers.parse(text)
+        if res is None:
+            break
+        else:
+            text = res.remainder
+            if res.parser is not Whitespace:
+                yield res.token
+
+
+def read_tokens(tokens: typing.Iterable[Token]):
+    def atom(s: str):
+        for type_ in (int, float):
+            try:
+                return type_(s)
+            except ValueError:
+                pass
+        return s
+
+    res = []
+    for token in tokens:
+        if token.text == '[':
+            res.append(read_tokens(tokens))
+        elif token.text == ']':
+            break
+        else:
+            res.append(atom(token.text))
+    return res
+
+
+def load_file(path) -> Stream:
     with open(path, encoding='utf-8') as file:
-        return '\n'.join(file)
+        return Stream(file.read())
 
 
-tree = parse(load('code.lisp'))
+def load(path):
+    return read_tokens(tokenize(load_file(path)))[0]
+
+
+tree = load('code.lisp')
+
 # display(tree)
 print(evaluate(tree, env))
